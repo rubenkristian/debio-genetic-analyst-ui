@@ -36,7 +36,7 @@ export default [
       {
         path: "orders",
         name: "ga-orders",
-        meta: { pageHeader: "Orders", maintenance: true },
+        meta: { pageHeader: "Orders"},
         component: () => import(/* webpackChunkName */ "@/views/Dashboard/GeneticAnalyst/Orders")
       },
       {
