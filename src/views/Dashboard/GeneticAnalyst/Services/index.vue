@@ -200,7 +200,7 @@ export default {
 
   methods: {
     async getDeleteServiceFee() {
-      this.txWeight = "Calculatiing..."
+      this.txWeight = "Calculating..."
       const txWeight = await deleteGeneticAnalystServiceFee(this.api, this.wallet, this.serviceId)
       this.txWeight = `${Number(this.web3.utils.fromWei(String(txWeight.partialFee), "ether")).toFixed(4)} DBIO`
     },
@@ -241,8 +241,7 @@ export default {
         this.isLoading = true
         await deleteGeneticAnalystService(this.api, this.wallet, this.serviceId)
       } catch (e) {
-        const error = await(errorHandler(e.message))
-        this.error = error
+        this.error = await(errorHandler(e.message))
         this.showModal = false
         this.isLoading = false
       }
