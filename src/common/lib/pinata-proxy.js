@@ -30,8 +30,8 @@ export const uploadFile = val => {
     pinataJwtKey,
     source.token,
     (progressEvent) => {
-      if(progressEvent.lengthComputable) {
-        let percentCompleted = Math.round( (progressEvent.loaded * 100) / progressEvent.total )
+      if (progressEvent.lengthComputable) {
+        let percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
         store.dispatch("geneticData/getLoadingProgress", {
           progress: percentCompleted
         })
