@@ -8,47 +8,44 @@
             v-icon mdi-close 
 
         v-card-text
-          .dialog-success__title {{ title }}
+          .dialog-success__title Insufficient Balance
 
-          .dialog-success__image
-            v-img(v-bind:src="checkCircle" max-width="80")
+          ui-debio-icon.dialog-success__image(
+            :icon="alertTriangleIcon"
+            size="87"
+            stroke
+          )
 
-          .dialog-success__message {{ message }}
+          .dialog-success__message Your transaction cannot succeed due to insufficient balance, check your account balance
 
           ui-debio-button.dialog-success__buttons(
             color="secondary"
             block
-            @click="onSubmit"
-          ) Ok
+            @click="closeDialog"
+          ) DISMIS
 
 </template>
 
 <script>
 
-import checkCircle from "@/assets/check-circle-primary.png"
+import {alertTriangleIcon} from "@debionetwork/ui-icons"
 
 
 export default {
   name: "SuccessDialog",
 
   data: () => ({
-    checkCircle
+    alertTriangleIcon
   }),
 
 
   props: {
-    show: Boolean,
-    title: { type: String, default: "Title" },
-    message: { type: String, default: "" }
+    show: Boolean
   },
 
   methods: {
     closeDialog() {
       this.$emit("close")
-    },
-
-    onSubmit() {
-      this.$emit("submit")
     }
   }
 }
@@ -80,11 +77,6 @@ export default {
       margin: 0px 27px
       font-weight: 600
       @include button-2
-
-    &__border
-      border: 1px solid #E9E9E9
-      border-radius: 4px
-      margin: 20px 27px
 
     &__buttons
       margin-top: 20px 
