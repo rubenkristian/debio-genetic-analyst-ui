@@ -78,6 +78,19 @@
           :max="new Date().toISOString().slice(0, 10)"
         )
 
+         ui-debio-input(
+          :error="error && !profile.phoneNumber"
+          :rules="$options.rules.profile.phoneNumber"
+          variant="small"
+          label="Phone"
+          placeholder="Add Phone Number"
+          v-model="profile.phoneNumber"
+          outlined
+          block
+          validate-on-blur
+          style="margin-top: 15px;"
+        )
+
         ui-debio-input(
           :error="error && !profile.email"
           :rules="$options.rules.profile.email"
@@ -91,18 +104,17 @@
         )
 
         ui-debio-input(
-          :error="error && !profile.phoneNumber"
-          :rules="$options.rules.profile.phoneNumber"
+          :error="error && !profile.profileLink"
+          :rules="$options.rules.profile.profileLink"
           variant="small"
-          label="Phone"
-          placeholder="Add Phone Number"
-          v-model="profile.phoneNumber"
+          label="Linkedin URL"
+          placeholder="Add Linkedin"
+          v-model="profile.profileLink"
           outlined
           block
           validate-on-blur
-          style="margin-top: 15px;"
         )
-        
+       
         label.text-label Staking Amount
 
         v-row(no-gutters)
@@ -394,7 +406,7 @@
       title="Success"
       message="Your account has been edited!"      
       @close="isSuccess = false"
-      @submit="isSuccess = false"
+      @submit="goToDashboard"
     ) 
 
     ConfirmationDialog(
@@ -475,6 +487,7 @@ export default {
       dateOfBirth: null,
       email: "",
       phoneNumber: "",
+      profileLink: "",
       specialization: null,
       specifyOther: "",
       availabilityStatus: "",
@@ -554,6 +567,12 @@ export default {
         rulesHandler.FIELD_REQUIRED,
         rulesHandler.FILE_SIZE(2000000),
         rulesHandler.DEFAULT_IMAGE
+      ],
+      profileLink: [
+        rulesHandler.FIELD_REQUIRED,
+        rulesHandler.ENGLISH_ALPHABET,
+        rulesHandler.MAX_CHARACTER(255),
+        rulesHandler.WEBSITE
       ]
     },
     document: {
@@ -620,7 +639,8 @@ export default {
           email: analystData?.info?.email,
           phoneNumber: analystData?.info?.phoneNumber,
           specialization: analystData?.info?.specialization,
-          availabilityStatus: analystData?.availabilityStatus
+          availabilityStatus: analystData?.availabilityStatus,
+          profileLink: analystData?.info?.profileLink
         }
 
         const dateOfBirth = analystData.info.dateOfBirth.replaceAll(",", "")
@@ -794,7 +814,8 @@ export default {
         specialization,
         specifyOther,
         experiences,
-        certification
+        certification,
+        profileLink
       } = this.profile
       const _dateOfBirth = new Date(dateOfBirth).getTime()
       const experienceValidation = experiences.length === 1 && experiences.find(value => value.title === "")
@@ -806,7 +827,7 @@ export default {
         certification: certification
       }
 
-      if (!profileImage || !firstName || !lastName || !gender || !dateOfBirth || !email || !phoneNumber || !_specialization || experienceValidation || certificateValidation) {
+      if (!profileImage || !firstName || !lastName || !gender || !dateOfBirth || !email || !phoneNumber || !_specialization || experienceValidation || certificateValidation || !profileLink) {
         return this.error = true
       }
       this.isLoading = true
@@ -824,7 +845,8 @@ export default {
             email,
             phoneNumber,
             specialization: _specialization,
-            profileImage
+            profileImage,
+            profileLink
           }
         )
         await updateQualification(
@@ -887,6 +909,10 @@ export default {
 
     limitChar(value) {
       return value.length > 32 ? `${value.substring(0, 32)}...` : value
+    },
+
+    goToDashboard() {
+      this.$router.push({ name: "ga-dashboard"})
     }
   }
 }
