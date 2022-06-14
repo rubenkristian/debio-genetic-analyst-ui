@@ -38,7 +38,7 @@
           span.text-secondary {{ item.description }}
           span.text-title Service Duration: {{ item.expectedDuration.duration }} {{ item.expectedDuration.durationType }}
           .ga-account__space-between
-            span.text-link {{ item.file.name }}
+            span.text-link {{ item.file ? limitChar(item.file.name, 32) : "" }}
             .flex-row-wrapper 
               ui-debio-icon.icon-text.icon-button(
                 :icon="pencilIcon"
@@ -67,6 +67,7 @@
 
       StakeDialog(
         :show="showStakeDialog" 
+        :loading="submitLoading"
         @close="showStakeDialog = false"
         @submit="onSubmit"
       )
@@ -119,8 +120,8 @@ export default {
 
   computed: {
     ...mapState({
-      lastEventData: (state) => state.substrate.lastEventData,
       api: (state) => state.substrate.api,
+      web3: (state) => state.metamask.web3,
       wallet: (state) => state.substrate.wallet
     }),
 
@@ -159,7 +160,7 @@ export default {
         description,
         testResultSample
       }
-
+      
       const services = this.services
 
       if (this.editId !== null) {
@@ -215,19 +216,28 @@ export default {
       const services = []
       const data = this.services
       this.submitLoading = true
-      this.showStakeDialog = false
 
-      data.forEach(element => {
-        delete element.file
-        
-        services.push(element)
+      data.forEach(service => {
+        const totalPrice = this.web3.utils.toWei(String(service.pricesByCurrency[0].totalPrice), "ether")
+        delete service.file
+
+        services.push({
+          ...service, 
+          pricesByCurrency: [{
+            currency: service.pricesByCurrency[0].currency,
+            totalPrice: totalPrice,
+            priceComponents: [{component: "Main Price", value: totalPrice}]
+          }]
+        })
       });
-
+      
       try {
         await stakeGeneticAnalyst(this.api, this.wallet)
         await bulkCreateGeneticAnalystService(this.api, this.wallet, services)
 
         localStorage.removeLocalStorageByName("temporaryServices")
+        this.showStakeDialog = false
+
         await this.goToDashboard()
       } catch (error) {
         console.error(error)
@@ -251,6 +261,10 @@ export default {
         testResultSample: null,
         file: {name: ""}
       }
+    },
+
+    limitChar(value, limit) {
+      return value.length > limit ? `${value.substring(0, limit)}...` : value
     }
   }
 }

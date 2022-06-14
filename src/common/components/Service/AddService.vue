@@ -9,7 +9,7 @@
         block
         validate-on-blur
         v-model="service.name"
-        :error="error && !service.name"
+        :error="isDirty.service && isDirty.service.name"
         :rules="$options.rules.service.name"
       )
 
@@ -21,7 +21,7 @@
         outlined
         block
         v-model="service.description"
-        :error="error && !service.description"
+        :error="isDirty.service && isDirty.service.description"
         :rules="$options.rules.service.description"
       )
 
@@ -34,15 +34,15 @@
             block
             validate-on-blur
             v-model="service.totalPrice"
-            :error="error && !service.totalPrice"
+            :error="isDirty.service && isDirty.service.totalPrice"
             :rules="$options.rules.service.totalPrice"
           )
         v-col(md="3")
           ui-debio-dropdown(
             :items="currency"
-            placeholder="DBIO"
             variant="small"
             label="Currency"
+            placeholder=""
             outlined
             close-on-select
             validate-on-blur
@@ -50,7 +50,7 @@
             item-value="currency"
             block
             v-model="service.currency"
-            :error="error && !service.currency"
+            :error="isDirty.service && isDirty.service.currency"
             :rules="$options.rules.service.currency"
           )
 
@@ -62,16 +62,16 @@
         block
         validate-on-blur
         v-model="service.duration"
-        :error="error && !service.duration"
+        :error="isDirty.service && isDirty.service.duration"
         :rules="$options.rules.service.duration"
       )
 
-      div.text-label Result Sample (.pdf, .doc, .jpg, .png - Maximum fle size is 2MB)
+      div.text-label Result Sample (.pdf, .doc, .jpg, .png - Maximum file size is 2MB)
       v-row
         v-col.file-wrapper(class="pr-2")
           ui-debio-input(
             variant="small"
-            v-model="service.file.name"
+            v-model="file.name"
             label=""
             outlined
             block
@@ -117,7 +117,7 @@
             color="secondary"
             height="2.5rem"
             :loading="loading"
-            :disabled="loading || disableService"
+            :disabled="disableService"
             block
             @click="handleSubmit"
           ) Submit
@@ -128,7 +128,7 @@
             color="secondary"
             height="2.5rem"
             :loading="loading"
-            :disabled="loading || disableService"
+            :disabled="disableService"
             block
             @click="handleSubmit"
           ) {{isEdit ? "Save" : "Add"}} Service
@@ -146,8 +146,8 @@
 import {mapState} from "vuex"
 import errorMessages from "@/common/constants/error-messages"
 import {uploadFile, getFileUrl} from "@/common/lib/pinata-proxy"
-// import {createGeneticAnalystServiceFee} from "@/common/lib/polkadot-provider/command/genetic-analyst/services"
 import rulesHandler from "@/common/constants/rules"
+import { validateForms } from "@/common/lib/validate"
 
 const documentFormat = [
   "image/jpg",
@@ -158,6 +158,7 @@ const documentFormat = [
 
 export default {
   name: "GAAddService",
+  mixins: [validateForms],
 
   data: () => ({
     currency: [{currency: "DBIO"}],
@@ -166,11 +167,11 @@ export default {
       currency: "DBIO",
       totalPrice: "",
       duration: "",
-      durationType: "Days",
-      description: "",
-      testResultSample: null,
-      file: {name: ""}
+      description: ""
     },
+    durationType: "Days",
+    testResultSample: null,
+    file: {name: ""},
     error: false,
     errorFileMessage: "",
     loading: false
@@ -187,8 +188,15 @@ export default {
 
   watch: { 
     data: function(newVal) {
-      console.log("newVal", newVal)
-      this.service = newVal
+      this.service = {
+        name: newVal.name,
+        totalPrice: newVal.totalPrice,
+        duration: newVal.duration,
+        description: newVal.description
+      },
+      this.durationType = newVal.durationType
+      this.testResultSample = newVal.testResultSample
+      this.file = newVal.file
     },
 
     isEdit: function(newVal) {
@@ -203,14 +211,21 @@ export default {
   computed: {
     ...mapState({
       api: (state) => state.substrate.api,
-      web3: (state) => state.metamask.web3,
       wallet: (state) => state.substrate.wallet
     }),
 
     disableService() {
-      const disabled = serviceValidation(this.service)
-      
-      return disabled 
+      const {
+        name,
+        totalPrice,
+        duration,
+        description
+      } = this.service
+
+      if (!name || !totalPrice || !duration || !description || !this.testResultSample) {
+        return true
+      }
+      return false
     }
   },
 
@@ -238,33 +253,29 @@ export default {
         rulesHandler.FIELD_REQUIRED,
         val => /^[0-9]+$/.test(val) || "Expected duration is invalid",
         rulesHandler.MAX_CHARACTER(3)
-      ],
-      file: [
-        rulesHandler.FIELD_REQUIRED,
-        rulesHandler.FILE_SIZE(2000000),
-        rulesHandler.DEFAULT_IMAGE && rulesHandler.DEFAULT_ACCEPT_DOCUMENTS
       ]
     }
   },
 
-  // async created() {
-  //   await this.getServiceTxWeight()
-  // },
-
   methods: {
-    // async getServiceTxWeight() {
-    //   const getTxWeight = await createGeneticAnalystServiceFee(this.api, this.wallet, this.service)
-
-    //   this.txWeight = `${this.web3.utils.fromWei(String(getTxWeight.partialFee), "ether")}`
-    // },
-    
     handleSubmit() {
-      if (serviceValidation(this.service)) {
-        this.error = true
+      this._touchForms("service")
+      const isDocumentValid = Object.values(this.isDirty?.service).every(v => v !== null && v === false)
+      
+      if (!isDocumentValid) {
+        if (!this.testResultSample) this.errorFileMessage = errorMessages.REQUIRED
+        
         return
       }
 
-      this.onSubmit(this.service)
+      const service = {
+        ...this.service,
+        durationType: this.durationType,
+        testResultSample: this.testResultSample,
+        file: this.file
+      }
+      
+      this.onSubmit(service)
     },
     
     handleCancelEdit() {
@@ -287,6 +298,7 @@ export default {
         return (this.errorFileMessage = errorMessages.FILE_SIZE(2))
 
       this.loading = true
+      this.errorFileMessage = ""
       const dataFile = await this.setupFileReader(file)
       const result = await uploadFile({
         title: dataFile.name,
@@ -295,8 +307,8 @@ export default {
       })
       const link = getFileUrl(result.IpfsHash)
 
-      this.service.testResultSample = link
-      this.service.file = file
+      this.testResultSample = link
+      this.file = file
       this.loading = false
     },
 
@@ -314,20 +326,6 @@ export default {
   }
 }
 
-function serviceValidation(data) {
-  const {
-    name,
-    totalPrice,
-    duration,
-    description,
-    testResultSample
-  } = data
-
-  if (!name || !totalPrice || !duration || !description || !testResultSample) {
-    return true
-  }
-  return false
-}
 </script>
 
 <style lang="sass" scoped>
