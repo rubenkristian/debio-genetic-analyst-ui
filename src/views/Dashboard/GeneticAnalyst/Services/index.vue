@@ -7,6 +7,15 @@
         :message="error ? error.message : ''"
         @close="error = null"
       )
+      
+      WarningDialog(
+        :show="showActiveOrder"
+        title="Unfinished Order"
+        btnMessage="Go to Dashboard"
+        message="You still have active orders to complete. Resume any pending orders before continuing with this process."
+        @close="showActiveOrder = false"
+        @submit="goToDashboard"
+      )
 
       ui-debio-modal.ga-services__modal-card(
         :show="showModal"
@@ -71,7 +80,7 @@
 
 
       .ga-services__table
-        ui-debio-data-table(:headers="headers" :items="items")
+        ui-debio-data-table(:headers="headers" :items="items" :loading="isLoading")
           template(slot="prepend")
             .ga-services__text
               h2.ga-services__table-title My Services
@@ -104,26 +113,31 @@
 </template>
 
 <script>
-import { mapState } from "vuex"
+import {mapState} from "vuex"
 
-import { 
-  geneticAnalystIllustration, 
-  plusCircle, 
-  pencilIcon, 
-  trashIcon, 
-  alertTriangleIcon 
+import {
+  geneticAnalystIllustration,
+  plusCircle,
+  pencilIcon,
+  trashIcon,
+  alertTriangleIcon
 } from "@debionetwork/ui-icons"
 
-import { errorHandler } from "@/common/lib/error-handler"
-import { queryGeneticAnalystByAccountId } from "@debionetwork/polkadot-provider"
-import { queryGeneticAnalystServicesByHashId } from "@debionetwork/polkadot-provider"
-import { 
-  deleteGeneticAnalystService, 
-  deleteGeneticAnalystServiceFee 
+import {errorHandler} from "@/common/lib/error-handler"
+import {queryGeneticAnalystByAccountId} from "@debionetwork/polkadot-provider"
+import {queryGeneticAnalystServicesByHashId} from "@debionetwork/polkadot-provider"
+import {
+  deleteGeneticAnalystService,
+  deleteGeneticAnalystServiceFee
 } from "@debionetwork/polkadot-provider"
+import {GAGetOrders} from "@/common/lib/api"
+
+import WarningDialog from "@/common/components/Dialog/WarningDialog"
 
 export default {
   name: "GAServices",
+
+  components: {WarningDialog},
 
   data: () => ({
     geneticAnalystIllustration,
@@ -136,10 +150,12 @@ export default {
     serviceId: "",
 
     showModal: false,
+    showActiveOrder: false,
     cardBlock: false,
     isLoading: false,
     serviceList: [],
     items: [],
+    orders: [],
     headers: [
       {
         text: "Service Name",
@@ -184,7 +200,11 @@ export default {
       if (e !== null) {
         const dataEvent = JSON.parse(e.data.toString())
         if (dataEvent[1] === this.wallet.address) {
-          const toRefetch = ["GeneticAnalystServiceDeleted", "GeneticAnalystServiceUpdated", "GeneticAnalystServiceCreated"]
+          const toRefetch = [
+            "GeneticAnalystServiceDeleted",
+            "GeneticAnalystServiceUpdated",
+            "GeneticAnalystServiceCreated"
+          ]
 
           if (toRefetch.includes(e.method)) {
             this.getServiceList()
@@ -198,35 +218,64 @@ export default {
   },
 
   async mounted() {
+    await this.getGAOrders()
     await this.getServiceList()
-  }, 
+  },
 
   methods: {
     async getDeleteServiceFee() {
       this.txWeight = "Calculating..."
-      const txWeight = await deleteGeneticAnalystServiceFee(this.api, this.wallet, this.serviceId)
-      this.txWeight = `${Number(this.web3.utils.fromWei(String(txWeight.partialFee), "ether")).toFixed(4)} DBIO`
+      const txWeight = await deleteGeneticAnalystServiceFee(
+        this.api,
+        this.wallet,
+        this.serviceId
+      )
+      this.txWeight = `${Number(
+        this.web3.utils.fromWei(String(txWeight.partialFee), "ether")
+      ).toFixed(4)} DBIO`
     },
 
     async getServiceList() {
       this.items = []
-      const analystDetail = await queryGeneticAnalystByAccountId(this.api, this.wallet.address)
+      const analystDetail = await queryGeneticAnalystByAccountId(
+        this.api,
+        this.wallet.address
+      )
       this.serviceList = analystDetail.services
 
       for (const serviceId of this.serviceList) {
-        const serviceDetail = await queryGeneticAnalystServicesByHashId(this.api, serviceId)
+        const serviceDetail = await queryGeneticAnalystServicesByHashId(
+          this.api,
+          serviceId
+        )
         const {
           id,
-          info: { description, name: serviceName, testResultSample }
+          info: {description, name: serviceName, testResultSample}
         } = serviceDetail
 
-        const price = this.formatPrice(serviceDetail.info.pricesByCurrency[0].totalPrice)
+        const price = this.formatPrice(
+          serviceDetail.info.pricesByCurrency[0].totalPrice
+        )
         const currency = serviceDetail.info.pricesByCurrency[0].currency
         const duration = `${serviceDetail.info.expectedDuration.duration} ${serviceDetail.info.expectedDuration.durationType}`
-        
-        const service = { id, description, serviceName, testResultSample, price, duration, currency }
+
+        const service = {
+          id,
+          description,
+          serviceName,
+          testResultSample,
+          price,
+          duration,
+          currency
+        }
         this.items.push(service)
       }
+    },
+
+    async getGAOrders() {
+      const orders = await GAGetOrders()
+
+      this.orders = orders
     },
 
     formatPrice(price) {
@@ -234,135 +283,150 @@ export default {
     },
 
     async showDialog(id) {
-      this.serviceId = id  
+      this.serviceId = id
       this.showModal = true
       await this.getDeleteServiceFee()
     },
 
-    async onDelete() {
-      try{
+    onDelete() {
+      const isActiveOrder = this.orders?.data?.some(
+        (order) =>
+          order._source.service_id === this.serviceId &&
+          order._source.status === "Paid"
+      )
+      
+      if (isActiveOrder) this.showActiveOrder = true
+      else this.deleteService() 
+    },
+
+    async deleteService() {
+      try {
         this.isLoading = true
         await deleteGeneticAnalystService(this.api, this.wallet, this.serviceId)
       } catch (e) {
-        this.error = await(errorHandler(e.message))
+        this.error = await errorHandler(e.message)
         this.showModal = false
         this.isLoading = false
       }
+    },
+
+    goToDashboard() {
+      this.$router.push({name: "dashboard"})
     }
   }
 }
 </script>
 
 <style lang="sass" scoped>
-  @import "@/common/styles/functions.sass"
-  @import "@/common/styles/mixins.sass"
+@import "@/common/styles/functions.sass"
+@import "@/common/styles/mixins.sass"
 
-  .ga-services
-    &__wrapper
-      display: flex
-      flex-direction: column
-      gap: toRem(35px)
+.ga-services
+  &__wrapper
+    display: flex
+    flex-direction: column
+    gap: toRem(35px)
 
-    &__modal-title
-      margin-top: toRem(34px)
-      margin-bottom: toRem(36px)
-      @include h6
+  &__modal-title
+    margin-top: toRem(34px)
+    margin-bottom: toRem(36px)
+    @include h6
 
-    &__modal-desc
-      display: flex
-      align-items: center
-      letter-spacing: -0.0044em
-      margin-top: toRem(21px)
-      padding-left: toRem(24px)
-      padding-right: toRem(24px)
-      @include new-body-text-2-medium
-
-    &__modal-button
-      padding: toRem(24px)
-      width: 100%
-
-    &__tx-weight
-      padding-left: toRem(24px)
-      padding-right: toRem(24px)
-      width: 100%
-      display: flex
-      justify-content: space-between
-
-    &__tx-weight-text
-      letter-spacing: -0.004em
-      @include body-text-3-opensans
-    
-
-    &__table-title
-      @include body-text-medium-1
-
-    &__table-subtitle
-      @include body-text-3
-
-    &__service-name
-      width: toRem(120px)
-
-    &__description
-      width: toRem(328px)
-
-    &__price
-      width: toRem(78px)
-    
-    &__duration
-      width: toRem(96px)
-
-    &__action
-      width: toREm(45px)
-      display: flex
-      align-items: center
-      justify-content: center
-      gap: toRem(20px)
-
-
-
-    &::v-deep
-      .v-data-table > .v-data-table__wrapper > table > tbody > tr > td
-        @include body-text-3
-
-      .banner__content-description
-        margin-left: 10.25rem
-
-      .banner__subtitle
-        max-width: 32.2rem !important
-
-      .ui-debio-modal__card
-        width: toRem(400px)
-
-  .verification-status
+  &__modal-desc
     display: flex
     align-items: center
-    background: #FFFFFF
-    border-radius: toRem(8px)
-    transition: all cubic-bezier(.7,-0.04,.61,1.14) .3s
-    padding: toRem(20px)
+    letter-spacing: -0.0044em
+    margin-top: toRem(21px)
+    padding-left: toRem(24px)
+    padding-right: toRem(24px)
+    @include new-body-text-2-medium
 
-    &:hover
-      box-shadow: 0 0.125rem 0.625rem rgba(0, 0, 0, 0.1)
-      border-bottom: toRem(5px) solid rgba(0, 0, 0, 0.15)
-      transform: translateY(toRem(-5px))
+  &__modal-button
+    padding: toRem(24px)
+    width: 100%
 
-    &__icon
-      margin-right: toRem(18px)
+  &__tx-weight
+    padding-left: toRem(24px)
+    padding-right: toRem(24px)
+    width: 100%
+    display: flex
+    justify-content: space-between
 
-    &__text
-      pointer-events: none
-      @include body-text-medium-1
+  &__tx-weight-text
+    letter-spacing: -0.004em
+    @include body-text-3-opensans
 
-  .transition-slide-x
-    &-enter-active,
-    &-leave-active
-      transition: all cubic-bezier(.7, -0.04, .61, 1.14) .3s
 
-    &-enter
-      opacity: 0
-      transform: translateX(1.563rem)
+  &__table-title
+    @include body-text-medium-1
 
-    &-leave-to
-      opacity: 0
-      transform: translateX(-12.813rem)
+  &__table-subtitle
+    @include body-text-3
+
+  &__service-name
+    width: toRem(120px)
+
+  &__description
+    width: toRem(328px)
+
+  &__price
+    width: toRem(78px)
+
+  &__duration
+    width: toRem(96px)
+
+  &__action
+    width: toREm(45px)
+    display: flex
+    align-items: center
+    justify-content: center
+    gap: toRem(20px)
+
+
+
+  &::v-deep
+    .v-data-table > .v-data-table__wrapper > table > tbody > tr > td
+      @include body-text-3
+
+    .banner__content-description
+      margin-left: 10.25rem
+
+    .banner__subtitle
+      max-width: 32.2rem !important
+
+    .ui-debio-modal__card
+      width: toRem(400px)
+
+.verification-status
+  display: flex
+  align-items: center
+  background: #FFFFFF
+  border-radius: toRem(8px)
+  transition: all cubic-bezier(.7,-0.04,.61,1.14) .3s
+  padding: toRem(20px)
+
+  &:hover
+    box-shadow: 0 0.125rem 0.625rem rgba(0, 0, 0, 0.1)
+    border-bottom: toRem(5px) solid rgba(0, 0, 0, 0.15)
+    transform: translateY(toRem(-5px))
+
+  &__icon
+    margin-right: toRem(18px)
+
+  &__text
+    pointer-events: none
+    @include body-text-medium-1
+
+.transition-slide-x
+  &-enter-active,
+  &-leave-active
+    transition: all cubic-bezier(.7, -0.04, .61, 1.14) .3s
+
+  &-enter
+    opacity: 0
+    transform: translateX(1.563rem)
+
+  &-leave-to
+    opacity: 0
+    transform: translateX(-12.813rem)
 </style>
