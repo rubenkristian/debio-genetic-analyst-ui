@@ -88,13 +88,15 @@
               p {{ orderDataDetails.analysis_info.rejectedTitle }}
               p.order-section__subtitle Reason of rejection
 
-            p.order-section__result-file(
-              v-if="step === 3 && !rejectedOrder"
-              :title="`Download ${orderDataDetails.analysis_info.fileName}`"
-              :aria-label="orderDataDetails.analysis_info.fileName"
-              role="button"
-              @click="handleDownloadFile(orderDataDetails.analysis_info.reportLink, orderDataDetails.analysis_info.fileName)"
-            ) {{ orderDataDetails.analysis_info.fileName }}
+            .d-flex
+              p.order-section__result-file(
+                v-if="step === 3 && !rejectedOrder"
+                :title="`Download ${orderDataDetails.analysis_info.fileName}`"
+                :aria-label="orderDataDetails.analysis_info.fileName"
+                role="button"
+                @click="handleDownloadFile(orderDataDetails.analysis_info.reportLink, orderDataDetails.analysis_info.fileName)"
+              ) {{ orderDataDetails.analysis_info.fileName }}
+              span.ml-2 {{ orderDataDetails.analysis_info.fileSize }}
 
             p(v-if="hilightDescription")
               | {{ readMore ? hilightDescription : hilightDescription.substr(0, 130) }}
@@ -154,7 +156,7 @@
                 :aria-label="orderDataDetails.document.fileName"
                 role="button"
                 @click="handleDownloadFile(orderDataDetails.document.reportLink, orderDataDetails.document.fileName)"
-              ) {{ orderDataDetails.document.fileName }}
+              ) {{ orderDataDetails.document.fileName }} {{ orderDataDetails.document.fileSize }}
 
               .order-details__actions.d-flex.justify-space-between(v-if="orderDataDetails.analysis_info.status !== 'Rejected' && step === 1")
                 ui-debio-button(
@@ -471,11 +473,13 @@ export default {
           ...data,
           analysis_info: {
             ...analysisData,
-            fileName: analystReportDocument.rows[0].metadata.name
+            fileName: analystReportDocument.rows[0].metadata.name,
+            fileSize: this.formatBytes(analystReportDocument.rows[0].metadata?.keyvalues?.fileSize || analystReportDocument.rows[0].size)
           },
           document: {
             ...geneticData,
-            fileName: geneticLinkName.rows[0].metadata.name
+            fileName: geneticLinkName.rows[0].metadata.name,
+            fileSize: this.formatBytes(geneticLinkName.rows[0].metadata?.keyvalues?.fileSize || geneticLinkName.rows[0].size)
           },
           createdAt: new Date(+data.createdAt.replaceAll(",", "")).toLocaleString("en-GB", {
             day: "numeric",
@@ -649,7 +653,6 @@ export default {
             decryptedArrays = [...decryptedArrays, ...(decryptedFile ? decryptedFile : [])]
           }
 
-
           const unit8Arr = new Uint8Array(decryptedArrays)
           await downloadDocumentFile(unit8Arr, computeFileName, fileType)
         } else {
@@ -677,7 +680,8 @@ export default {
         await this.upload({
           encryptedFileChunks: dataFile.chunks,
           fileName: dataFile.fileName,
-          fileType: dataFile.fileType
+          fileType: dataFile.fileType,
+          fileSize: dataFile.fileSize
         })
 
         await submitGeneticAnalysis(
@@ -699,12 +703,14 @@ export default {
       const context = this
       const fr = new FileReader()
       const { file } = this.document
+
       return new Promise((resolve, reject) => {
         fr.onload = async function() {
           try {
             const encrypted = await context.encrypt({
               text: fr.result,
               fileType: file.type,
+              fileSize: file.size,
               fileName: file.name
             })
 
@@ -719,7 +725,7 @@ export default {
       })
     },
 
-    async encrypt({ text, fileType, fileName }) {
+    async encrypt({ text, fileType, fileName, fileSize }) {
       const context = this
       const arrChunks = []
       let chunksAmount
@@ -743,9 +749,10 @@ export default {
 
             if (arrChunks.length === chunksAmount) {
               resolve({
-                fileName: fileName,
-                chunks: arrChunks,
-                fileType: fileType
+                fileName,
+                fileType,
+                fileSize,
+                chunks: arrChunks
               })
             }
           }
@@ -755,13 +762,14 @@ export default {
       })
     },
 
-    async upload({ encryptedFileChunks, fileType, fileName }) {
+    async upload({ encryptedFileChunks, fileType, fileName, fileSize }) {
       const data = JSON.stringify(encryptedFileChunks)
       const blob = new Blob([data], { type: fileType })
 
       const result = await uploadFile({
         title: fileName,
         type: fileType,
+        size: fileSize,
         file: blob
       })
 
@@ -776,6 +784,19 @@ export default {
       } else {
         this.showTooltip = false
       }
+    },
+
+    formatBytes(bytes, decimals = 2) {
+      if (bytes === 0 || !bytes) return "(0 Bytes)"
+
+      const k = 1024
+      const dm = decimals < 0 ? 0 : decimals
+      const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+
+      const indexSizes = Math.floor(Math.log(bytes) / Math.log(k))
+      const computeValue = parseFloat((bytes / Math.pow(k, indexSizes)).toFixed(dm))
+
+      return `(${computeValue} ${sizes[indexSizes]})`
     }
   }
 }
