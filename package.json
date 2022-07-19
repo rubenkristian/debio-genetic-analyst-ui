@@ -1,6 +1,6 @@
 {
-  "name": "debio-web-app",
-  "version": "1.0.4",
+  "name": "debio-genetic-analyst-web-app",
+  "version": "1.0.5",
   "private": true,
   "license": "AGPL-3.0",
   "scripts": {
