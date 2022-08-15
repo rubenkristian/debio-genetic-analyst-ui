@@ -134,6 +134,7 @@ export default {
   computed: {
     ...mapState({
       lastEventData: (state) => state.substrate.lastEventData,
+      lastBlockData: (state) => state.substrate.lastBlockData,
       wallet: (state) => state.substrate.wallet,
       localListNotification: (state) => state.substrate.localListNotification,
       mnemonicData: (state) => state.substrate.mnemonicData
@@ -170,6 +171,7 @@ export default {
         this.$store.dispatch("substrate/addListNotification", {
           address: this.wallet.address,
           event: event,
+          block: this.lastBlockData,
           role: "analyst"
         });
       }
