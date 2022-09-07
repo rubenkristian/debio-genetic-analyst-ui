@@ -100,6 +100,7 @@ import Navbar from "@/common/components/Navbar.vue"
 import maintenancePageLayout from "@/views/Dashboard/maintenancePageLayout"
 import errorMessage from "@/common/constants/error-messages"
 import localStorage from "@/common/lib/local-storage"
+import { getUnlistedNotification } from "@/common/lib/notification"
 import VueRouter from "@/router"
 
 export default {
@@ -170,14 +171,7 @@ export default {
       handler: async function (event) {
         if (event === null) return
 
-        if (event.method === "GeneticAnalystUpdateVerificationStatus") await this.getAccount()
-
-        this.$store.dispatch("substrate/addListNotification", {
-          address: this.wallet.address,
-          event: event,
-          block: this.lastBlockData,
-          role: "analyst"
-        })
+        await getUnlistedNotification(parseInt(this.lastBlockData.replaceAll(",", "")))
       }
     }
   },
@@ -205,7 +199,7 @@ export default {
     async getListNotification() {
       await this.$store.dispatch("substrate/getListNotification", {
         address: this.wallet.address,
-        role: "customer"
+        role: "analyst"
       })
     },
 

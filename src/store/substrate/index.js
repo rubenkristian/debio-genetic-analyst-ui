@@ -5,6 +5,7 @@ import keyring from "@polkadot/ui-keyring"
 import { Keyring } from "@polkadot/keyring"
 import localStorage from "@/common/lib/local-storage"
 import { ApiPromise, WsProvider } from "@polkadot/api"
+import { getUnlistedNotification } from "@/common/lib/notification"
 import { queryGeneticAnalystByAccountId, processEvent, eventTypes } from "@debionetwork/polkadot-provider"
 
 const {
@@ -140,7 +141,6 @@ export default {
           "rewards",
           "orders",
           "geneticTesting",
-          "balances",
           "electronicMedicalRecord",
           "geneticData",
           "geneticAnalysisOrders",
@@ -151,18 +151,34 @@ export default {
 
         const { block } = (await api.rpc.chain.getBlock()).toHuman()
 
+        const getNotificationList = async () => {
+          const newBlock = parseInt(block?.header?.number?.replaceAll(",", ""))
+          let lastBlock = 0
+
+          const notifications = JSON.parse(localStorage.getLocalStorageByName(
+            `LOCAL_NOTIFICATION_BY_ADDRESS_${localStorage.getAddress()}_analyst`
+          ))
+
+          if (notifications?.length) lastBlock = parseInt((notifications[notifications.length-1].block).replaceAll(",", ""))
+
+          if (newBlock > lastBlock) await getUnlistedNotification(newBlock)
+        }
+
+        await getNotificationList()
+
         // Example of how to subscribe to events via storage
-        api.query.system.events((events) => {
-          events.forEach((record) => {
+        api.query.system.events(async (events) => {
+          for (const record of events) {
             const { event } = record
 
-
             if (allowedSections.includes(event.section)) {
-              if (event.method === "OrderPaid") localStorage.removeLocalStorageByName("lastOrderStatus")
+              const { block } = (await api.rpc.chain.getBlock()).toHuman()
+              await getNotificationList()
+
               commit("SET_LAST_EVENT", event)
               commit("SET_LAST_BLOCK", block?.header?.number ?? null)
             }
-          })
+          }
         })
 
         await api.isReady

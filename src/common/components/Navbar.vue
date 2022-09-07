@@ -105,10 +105,12 @@ import {
 import localStorage from "@/common/lib/local-storage"
 import { generalDebounce } from "@/common/lib/utils"
 import { queryAccountBalance } from "@debionetwork/polkadot-provider"
+import { setReadNotification } from "@/common/lib/api"
+
+let timeout
 
 export default {
   name: "Navbar",
-
 
   props: {
     notifications: { type: Array, default: () => [] },
@@ -131,7 +133,7 @@ export default {
     searchQuery: "",
     contentHover: false,
     loginStatus: false,
-    debounce: null,
+    notifReads: [],
     arrowPosition: "",
     balance: 0,
     walletAddress: "",
@@ -203,13 +205,15 @@ export default {
       setWalletBalance: "substrate/SET_WALLET_BALANCE"
     }),
 
-    handleNotificationRead(notif) {
+    async handleNotificationRead(notif) {
+      clearTimeout(timeout)
+      if (notif.read) return
+
       notif.read = true
-      this.$store.dispatch("substrate/updateDataListNotification", {
-        address: this.wallet.address,
-        role: "customer",
-        data: this.notifications
-      })
+      this.notifReads.push(notif.id)
+      timeout = setTimeout(async () => {
+        await setReadNotification(this.notifReads)
+      }, 2000)
     },
 
     async handleCopy(text) {
