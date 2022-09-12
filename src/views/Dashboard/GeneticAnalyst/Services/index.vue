@@ -54,7 +54,7 @@
 
       ui-debio-banner.ga-services__banner(
         title="Genetic Analyst"
-        subtitle="Povide service for customer who have been tested in previous years can get interpretation that leads to improved maintenance."
+        subtitle="Provide service for customer who have been tested previously can get interpretation that leads to improved maintenance."
         gradient-color="tertiary"
         with-decoration
       )
