@@ -1,267 +1,174 @@
 name: Deployer
 
 on:
+  push:
+    branches:
+      - main
+      - releases/**
   release:
     types:
       - published
-  workflow_run:
-    branches:
-      - main
-    workflows:
-      - 'Builder'
-    types:
-      - completed
 
 concurrency:
   group: deployer
 
 jobs:
-  compute-build-info:
+  build-and-push-docker-image:
+    name: Build and Push Docker Image
+    uses: ./.github/workflows/builder.yaml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  deploy-to-testnet:
+    needs: build-and-push-docker-image
+    if: ${{ github.event_name != 'release' }}
     runs-on: ubuntu-20.04
-    outputs:
-      sha_short: ${{ steps.build-info.outputs.sha_short }}
-      date: ${{ steps.build-info.outputs.date }}
-      latest_tag: ${{ steps.build-info.outputs.latest_tag }}
+    environment:
+      name: testnet
+    permissions:
+      id-token: write
+      contents: read
+    name: Deploy to Testnet
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: Compute build info
-        id: build-info
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0
+        with:
+          workload_identity_provider: ${{ secrets.TESTNET_GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.TESTNET_GOOGLE_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
+      - name: Get GKE Credentials
+        id: get-gke-credentials
+        uses: google-github-actions/get-gke-credentials@v0
+        with:
+          cluster_name: ${{ secrets.TESTNET_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.TESTNET_GKE_LOCATION }}
+          use_internal_ip: true
+          use_auth_provider: true
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+      - name: Tunneling SSH connections
+        run: gcloud compute ssh ${{ secrets.TESTNET_BASTION_INSTANCE_NAME }} --project=${{ secrets.TESTNET_GCP_PROJECT_ID }} --zone ${{ secrets.TESTNET_BASTION_INSTANCE_ZONE }} --quiet --tunnel-through-iap --ssh-flag "-4 -L 8888:127.0.0.1:8888 -N -q -f"
+      - name: Get Short SHA
+        id: get-short-sha
         shell: bash
         run: |
-          echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
-          echo "::set-output name=date::$(date +'%Y%m%d')"
+          echo "::set-output name=value::$(git rev-parse --short HEAD)"
+      - name: Setup Helm
+        id: setup-helm
+        uses: azure/setup-helm@v1
+        with:
+          version: 'v3.9.4'
+      - name: Perform Deployment
+        run: |
+          helm repo add debionetwork https://charts.debio.network
+          helm repo update
+          HTTPS_PROXY=127.0.0.1:8888 helm upgrade ${{ github.event.repository.name }} debionetwork/debio-app-deployer \
+            --install \
+            --set-string nameOverride=${{ github.event.repository.name }} \
+            --set-string image.repository=${{ github.event.repository.full_name }} \
+            --set-string image.tag=${{ steps.get-short-sha.outputs.value }} \
+            --set containerPort=80 \
+            --set-string serviceAccount.name=${{ github.event.repository.name }} \
+            --set-string serviceAccount.annotations."iam\.gke\.io/gcp-service-account"=${{ github.event.repository.name }}@${{ secrets.TESTNET_GCP_PROJECT_ID }}.iam.gserviceaccount.com \
+            --set config.secretsStore.enabled=true \
+            --set-string config.secretsStore.providerClass=${{ github.event.repository.name }}-secrets-store-provider \
+            --set-string config.secretsStore.name=${{ github.event.repository.name }}-secrets-store \
+            --set service.port=80 \
+            --set ingress.enabled=true \
+            --set-string ingress.className=nginx \
+            --set-string ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt \
+            --set-string ingress.hosts[0].host=${{ secrets.TESTNET_GENETIC_ANALYST_UI_DNS }} \
+            --set-string ingress.hosts[0].paths[0].path=/ \
+            --set-string ingress.hosts[0].paths[0].pathType=ImplementationSpecific \
+            --set-string ingress.tls[0].secretName=${{ secrets.TESTNET_GENETIC_ANALYST_UI_DNS }}-letsencrypt-tls \
+            --set-string ingress.tls[0].hosts[0]=${{ secrets.TESTNET_GENETIC_ANALYST_UI_DNS }} \
+            --set-string resources.requests.cpu=100m \
+            --set-string resources.requests.memory=128Mi \
+            --set-string resources.limits.cpu=300m \
+            --set-string resources.limits.memory=256Mi \
+            --set replicaCount=1 \
+            --set autoscaling.enabled=true \
+            --set autoscaling.minReplicas=1 \
+            --set autoscaling.maxReplicas=5 \
+            --set-string nodeSelector.node_pool=general \
+            --set-string nodeSelector."iam\.gke\.io/gke-metadata-server-enabled"="true"
+          HTTPS_PROXY=127.0.0.1:8888  kubectl rollout status deployment/${{ github.event.repository.name }}
 
-          version=${GITHUB_REF#refs/*/}
-          echo $version
-          echo "::set-output name=latest_tag::$version"
-
-  deploy-dev:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+  deploy-to-mainnet:
+    needs: build-and-push-docker-image
+    if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-20.04
-    needs: [compute-build-info]
-    environment: development
-    env:
-      DEPLOY: ${{ secrets.DEV_DEPLOY }}
+    environment:
+      name: mainnet
+    permissions:
+      id-token: write
+      contents: read
+    name: Deploy to Mainnet
     steps:
-      - name: Checkout code
-        if: "${{ env.DEPLOY == 'true' }}"
+      - name: Checkout Repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: Deploy
-        if: "${{ env.DEPLOY == 'true' }}"
-        uses: appleboy/ssh-action@master
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            ./connect.sh
-            helm repo add debio https://charts.debio.network
-            helm repo update
-            helm upgrade debio-genetic-analyst-ui debio/debio-genetic-analyst-ui \
-              --install \
-              --set-string image.repository=gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ github.repository }} \
-              --set-string image.tag=${{ needs.compute-build-info.outputs.sha_short }} \
-              --set-string imagePullSecrets[0].name=gcr-auth \
-              --set ingress.enabled=true \
-              --set-string ingress.className=nginx \
-              --set-string ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt \
-              --set-string ingress.annotations."nginx\.ingress\.kubernetes\.io/limit-rps"="100" \
-              --set-string ingress.hosts[0].host=${{ secrets.INGRESS_HOST }} \
-              --set-string ingress.hosts[0].paths[0].path=/ \
-              --set-string ingress.hosts[0].paths[0].pathType=ImplementationSpecific \
-              --set-string ingress.tls[0].secretName=debio-genetic-analyst-ui-tls \
-              --set-string ingress.tls[0].hosts[0]=${{ secrets.INGRESS_HOST }} \
-              --set-string resources.requests.cpu=100m \
-              --set-string resources.requests.memory=128Mi \
-              --set-string resources.limits.cpu=300m \
-              --set-string resources.limits.memory=256Mi \
-              --set replicaCount=1 \
-              --set autoscaling.enabled=true \
-              --set autoscaling.minReplicas=1 \
-              --set autoscaling.maxReplicas=11 \
-              --set-string nodeSelector.pool=general
-            kubectl rollout status deployment/debio-genetic-analyst-ui
-      - name: Sleuth webhook
-        if: "${{ env.DEPLOY == 'true' }}"
-        shell: bash
+          workload_identity_provider: ${{ secrets.MAINNET_GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.MAINNET_GOOGLE_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
+      - name: Get GKE Credentials
+        id: get-gke-credentials
+        uses: google-github-actions/get-gke-credentials@v0
+        with:
+          cluster_name: ${{ secrets.MAINNET_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.MAINNET_GKE_LOCATION }}
+          use_internal_ip: true
+          use_auth_provider: true
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+      - name: Tunneling SSH Connections
+        run: gcloud compute ssh ${{ secrets.MAINNET_BASTION_INSTANCE_NAME }} --project=${{ secrets.MAINNET_GCP_PROJECT_ID }} --zone ${{ secrets.MAINNET_BASTION_INSTANCE_ZONE }} --quiet --tunnel-through-iap --ssh-flag "-4 -L 8888:127.0.0.1:8888 -N -q -f"
+      - name: Setup Helm
+        id: setup-helm
+        uses: azure/setup-helm@v1
+        with:
+          version: 'v3.9.4'
+      - name: Perform Deployment
         run: |
-          curl -X POST -d api_key=${{ secrets.SLEUTH_API_KEY }} \
-          -d environment=${{ secrets.SLEUTH_ENVIRONMENT }} \
-          -d sha=$GITHUB_SHA ${{ secrets.SLEUTH_WEBHOOK }}
-
-  deploy-beta-release:
-    if: "github.event.release.prerelease && contains(needs.compute-build-info.outputs.latest_tag, 'beta')"
-    runs-on: ubuntu-20.04
-    needs: [compute-build-info]
-    environment: testnet
-    env:
-      DEPLOY: ${{ secrets.TESTNET_DEPLOY }}
-    steps:
-      - name: Checkout code
-        if: "${{ env.DEPLOY == 'true' }}"
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - name: Deploy
-        if: "${{ env.DEPLOY == 'true' }}"
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            ./connect.sh
-            helm repo add debio https://charts.debio.network
-            helm repo update
-            helm upgrade debio-genetic-analyst-ui debio/debio-genetic-analyst-ui \
-              --install \
-              --set-string image.repository=gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ github.repository }} \
-              --set-string image.tag=${{ needs.compute-build-info.outputs.latest_tag }} \
-              --set-string imagePullSecrets[0].name=gcr-auth \
-              --set ingress.enabled=true \
-              --set-string ingress.className=nginx \
-              --set-string ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt \
-              --set-string ingress.annotations."nginx\.ingress\.kubernetes\.io/limit-rps"="100" \
-              --set-string ingress.hosts[0].host=${{ secrets.INGRESS_HOST }} \
-              --set-string ingress.hosts[0].paths[0].path=/ \
-              --set-string ingress.hosts[0].paths[0].pathType=ImplementationSpecific \
-              --set-string ingress.tls[0].secretName=debio-genetic-analyst-ui-tls \
-              --set-string ingress.tls[0].hosts[0]=${{ secrets.INGRESS_HOST }} \
-              --set-string resources.requests.cpu=100m \
-              --set-string resources.requests.memory=128Mi \
-              --set-string resources.limits.cpu=300m \
-              --set-string resources.limits.memory=256Mi \
-              --set replicaCount=1 \
-              --set autoscaling.enabled=true \
-              --set autoscaling.minReplicas=1 \
-              --set autoscaling.maxReplicas=11 \
-              --set-string nodeSelector.pool=general
-            kubectl rollout status deployment/debio-genetic-analyst-ui
-      - name: Sleuth webhook
-        if: "${{ env.DEPLOY == 'true' }}"
-        shell: bash
-        run: |
-          curl -X POST -d api_key=${{ secrets.SLEUTH_API_KEY }} \
-          -d environment=${{ secrets.SLEUTH_ENVIRONMENT }} \
-          -d sha=$GITHUB_SHA ${{ secrets.SLEUTH_WEBHOOK }}
-
-  deploy-pre-release:
-    if: "github.event.release.prerelease && contains(needs.compute-build-info.outputs.latest_tag, 'rc')"
-    runs-on: ubuntu-20.04
-    needs: [compute-build-info]
-    environment: mainnet
-    env:
-      DEPLOY: ${{ secrets.MAINNET_DEPLOY }}
-    steps:
-      - name: Checkout code
-        if: "${{ env.DEPLOY == 'true' }}"
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - name: Deploy
-        if: "${{ env.DEPLOY == 'true' }}"
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            ./connect.sh
-            helm repo add debio https://charts.debio.network
-            helm repo update
-            helm upgrade debio-genetic-analyst-ui debio/debio-genetic-analyst-ui \
-              --install \
-              --set-string image.repository=gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ github.repository }} \
-              --set-string image.tag=${{ needs.compute-build-info.outputs.latest_tag }} \
-              --set-string imagePullSecrets[0].name=gcr-auth \
-              --set ingress.enabled=true \
-              --set-string ingress.className=nginx \
-              --set-string ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt \
-              --set-string ingress.annotations."nginx\.ingress\.kubernetes\.io/limit-rps"="100" \
-              --set-string ingress.hosts[0].host=${{ secrets.INGRESS_HOST }} \
-              --set-string ingress.hosts[0].paths[0].path=/ \
-              --set-string ingress.hosts[0].paths[0].pathType=ImplementationSpecific \
-              --set-string ingress.tls[0].secretName=debio-genetic-analyst-ui-tls \
-              --set-string ingress.tls[0].hosts[0]=${{ secrets.INGRESS_HOST }} \
-              --set-string resources.requests.cpu=100m \
-              --set-string resources.requests.memory=128Mi \
-              --set-string resources.limits.cpu=300m \
-              --set-string resources.limits.memory=256Mi \
-              --set replicaCount=2 \
-              --set autoscaling.enabled=true \
-              --set autoscaling.minReplicas=2 \
-              --set autoscaling.maxReplicas=11 \
-              --set-string nodeSelector.pool=general
-            kubectl rollout status deployment/debio-genetic-analyst-ui
-      - name: Sleuth webhook
-        if: "${{ env.DEPLOY == 'true' }}"
-        shell: bash
-        run: |
-          curl -X POST -d api_key=${{ secrets.SLEUTH_API_KEY }} \
-          -d environment=${{ secrets.SLEUTH_ENVIRONMENT }} \
-          -d sha=$GITHUB_SHA ${{ secrets.SLEUTH_WEBHOOK }}
-
-  deploy-release:
-    if: "startsWith(github.ref, 'refs/tags/') && !github.event.release.prerelease"
-    runs-on: ubuntu-20.04
-    needs: [compute-build-info]
-    environment: mainnet
-    env:
-      DEPLOY: ${{ secrets.MAINNET_DEPLOY }}
-    steps:
-      - name: Checkout code
-        if: "${{ env.DEPLOY == 'true' }}"
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - name: Deploy
-        if: "${{ env.DEPLOY == 'true' }}"
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            ./connect.sh
-            helm repo add debio https://charts.debio.network
-            helm repo update
-            helm upgrade debio-genetic-analyst-ui debio/debio-genetic-analyst-ui \
-              --install \
-              --set-string image.repository=gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ github.repository }} \
-              --set-string image.tag=${{ needs.compute-build-info.outputs.latest_tag }} \
-              --set-string imagePullSecrets[0].name=gcr-auth \
-              --set ingress.enabled=true \
-              --set-string ingress.className=nginx \
-              --set-string ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt \
-              --set-string ingress.annotations."nginx\.ingress\.kubernetes\.io/limit-rps"="10" \
-              --set-string ingress.hosts[0].host=${{ secrets.INGRESS_HOST }} \
-              --set-string ingress.hosts[0].paths[0].path=/ \
-              --set-string ingress.hosts[0].paths[0].pathType=ImplementationSpecific \
-              --set-string ingress.tls[0].secretName=debio-genetic-analyst-ui-tls \
-              --set-string ingress.tls[0].hosts[0]=${{ secrets.INGRESS_HOST }} \
-              --set-string resources.requests.cpu=100m \
-              --set-string resources.requests.memory=128Mi \
-              --set-string resources.limits.cpu=300m \
-              --set-string resources.limits.memory=256Mi \
-              --set replicaCount=2 \
-              --set autoscaling.enabled=true \
-              --set autoscaling.minReplicas=2 \
-              --set autoscaling.maxReplicas=11 \
-              --set-string nodeSelector.pool=general
-            kubectl rollout status deployment/debio-genetic-analyst-ui
-      - name: Sleuth webhook
-        if: "${{ env.DEPLOY == 'true' }}"
-        shell: bash
-        run: |
-          curl -X POST -d api_key=${{ secrets.SLEUTH_API_KEY }} \
-          -d environment=${{ secrets.SLEUTH_ENVIRONMENT }} \
-          -d sha=$GITHUB_SHA ${{ secrets.SLEUTH_WEBHOOK }}
+          helm repo add debionetwork https://charts.debio.network
+          helm repo update
+          HTTPS_PROXY=127.0.0.1:8888 helm upgrade ${{ github.event.repository.name }} debionetwork/debio-app-deployer \
+            --install \
+            --set-string nameOverride=${{ github.event.repository.name }} \
+            --set-string image.repository=${{ github.event.repository.full_name }} \
+            --set-string image.tag=${{ github.event.release.tag_name }} \
+            --set containerPort=80 \
+            --set-string serviceAccount.name=${{ github.event.repository.name }} \
+            --set-string serviceAccount.annotations."iam\.gke\.io/gcp-service-account"=${{ github.event.repository.name }}@${{ secrets.MAINNET_GCP_PROJECT_ID }}.iam.gserviceaccount.com \
+            --set config.secretsStore.enabled=true \
+            --set-string config.secretsStore.providerClass=${{ github.event.repository.name }}-secrets-store-provider \
+            --set-string config.secretsStore.name=${{ github.event.repository.name }}-secrets-store \
+            --set service.port=80 \
+            --set ingress.enabled=true \
+            --set-string ingress.className=nginx \
+            --set-string ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt \
+            --set-string ingress.hosts[0].host=${{ secrets.MAINNET_GENETIC_ANALYST_UI_DNS }} \
+            --set-string ingress.hosts[0].paths[0].path=/ \
+            --set-string ingress.hosts[0].paths[0].pathType=ImplementationSpecific \
+            --set-string ingress.tls[0].secretName=${{ secrets.MAINNET_GENETIC_ANALYST_UI_DNS }}-letsencrypt-tls \
+            --set-string ingress.tls[0].hosts[0]=${{ secrets.MAINNET_GENETIC_ANALYST_UI_DNS }} \
+            --set-string resources.requests.cpu=100m \
+            --set-string resources.requests.memory=128Mi \
+            --set-string resources.limits.cpu=300m \
+            --set-string resources.limits.memory=256Mi \
+            --set replicaCount=1 \
+            --set autoscaling.enabled=true \
+            --set autoscaling.minReplicas=1 \
+            --set autoscaling.maxReplicas=5 \
+            --set-string nodeSelector.node_pool=general \
+            --set-string nodeSelector."iam\.gke\.io/gke-metadata-server-enabled"="true"
+          HTTPS_PROXY=127.0.0.1:8888  kubectl rollout status deployment/${{ github.event.repository.name }}
