@@ -37,6 +37,7 @@
             :error="isDirty.service && isDirty.service.totalPrice"
             :rules="$options.rules.service.totalPrice"
           )
+          span.text-label {{ priceHint }}
         v-col(md="3")
           ui-debio-dropdown(
             :items="currency"
@@ -148,6 +149,7 @@ import errorMessages from "@/common/constants/error-messages"
 import {uploadFile, getFileUrl} from "@/common/lib/pinata-proxy"
 import rulesHandler from "@/common/constants/rules"
 import { validateForms } from "@/common/lib/validate"
+import { getConversionCache } from "@/common/lib/api/customer/debio-balance"
 
 const documentFormat = [
   "image/jpg",
@@ -176,7 +178,9 @@ export default {
     file: {name: ""},
     error: false,
     errorFileMessage: "",
-    loading: false
+    loading: false,
+    usdRate: 0,
+    priceHint: ""
   }),
 
   props: {
@@ -208,7 +212,22 @@ export default {
 
     txWeight: function(newVal) {
       this.txWeight = newVal
+    },
+
+    service: {
+      handler(val) {
+        if (val.totalPrice !== "" && (/^\d+(\.\d{1,4})?$/.test(val.totalPrice))) {
+          this.priceHint = `${this.service.totalPrice} ${this.service.currency} = ${(this.usdRate.conversion * this.service.totalPrice).toFixed(4)} USD`
+        } else {
+          this.priceHint = ""
+        }
+      },
+      deep: true
     }
+  },
+
+  async created() {
+    this.usdRate = await getConversionCache(this.service.currency, "USD")
   },
 
   computed: {
