@@ -37,7 +37,7 @@
             :error="isDirty.service && isDirty.service.totalPrice"
             :rules="$options.rules.service.totalPrice"
           )
-          span.text-label {{ priceHint }}
+          span.text-required {{ priceHint }}
         v-col(md="3")
           ui-debio-dropdown(
             :items="currency"
@@ -54,6 +54,7 @@
             :error="isDirty.service && isDirty.service.currency"
             :rules="$options.rules.service.currency"
           )
+      div.text-required *Every transaction fee includes a 5% service charge.
 
       ui-debio-input(
         variant="small"
@@ -406,5 +407,9 @@ export default {
 .trans-weight-icon
   font-size: 12px
   margin-left: 5px
+
+.text-required
+  color: #b5b5b5
+  @include body-text-3-opensans
 
 </style>
