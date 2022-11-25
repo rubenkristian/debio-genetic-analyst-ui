@@ -183,16 +183,6 @@ export default {
         unit: "ether",
         balance: 0
       },
-
-      {
-        id: 1,
-        name: "usdn",
-        icon: "near-logo",
-        currency: "USDN",
-        unit: "ether",
-        balance: 0
-      },
-
       {
         id: 2,
         name: "usdt",
@@ -229,16 +219,14 @@ export default {
   },
 
   async mounted () {
-    this.fetchWalletBalance()
-    this.fetchPolkadotBallance()
+    this.refetchBalance()
   },
 
   watch: {
     lastEventData(val) {
       if(!val) return
 
-      this.fetchWalletBalance()
-      this.fetchPolkadotBallance()
+      this.refetchBalance()
       this.loading = false
     }
   },
@@ -317,13 +305,22 @@ export default {
 
     async fetchPolkadotBallance() {
       this.polkadotWallets.forEach(async (w) => {
-        if (w.name !== "debio") {
+        if (w && w.name !== "debio") {
           const { balance } = await queryGetAssetBalance(
             this.api, w.id, this.wallet.address
           )
           w.balance = this.web3.utils.fromWei(balance.replaceAll(",", ""), w.unit)
         }
       })
+    },
+
+    async refetchBalance() {
+      try {
+        await this.fetchWalletBalance()
+        await this.fetchPolkadotBallance()
+      } catch (err) {
+        console.error(err)
+      }
     },
 
     signOut () {

@@ -52,7 +52,7 @@ import {alertTriangleIcon} from "@debionetwork/ui-icons"
 import {stakeGeneticAnalystFee, queryGeneticAnalystMinimumStakeAmount} from "@debionetwork/polkadot-provider"
 
 export default {
-  name: "DeleteServiceDialog",
+  name: "StakeDialog",
 
   data: () => ({
     alertTriangleIcon,
