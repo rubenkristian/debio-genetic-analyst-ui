@@ -90,7 +90,7 @@ export default {
         this.minimumStaking = this.web3.utils.fromWei(String(minimumStaking.toString().split(",").join("")), "ether")
         this.sufficientBalance = this.walletBalance > (Number(this.minimumStaking) + Number(this.txWeight))
       } catch (err) {
-        console.log(err)
+        console.error(err)
       }
     },
 
