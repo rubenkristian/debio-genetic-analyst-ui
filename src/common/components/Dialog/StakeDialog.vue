@@ -83,11 +83,15 @@ export default {
   methods: {
 
     async getMinimumStakingAmount() {
-      const minimumStaking = await queryGeneticAnalystMinimumStakeAmount(this.api)
-      const getTxWeight = await this.getTxWeight()
-      this.txWeight = `${this.web3.utils.fromWei(String(getTxWeight.partialFee), "ether")}`
-      this.minimumStaking = this.web3.utils.fromWei(String(minimumStaking, "ether"))
-      this.sufficientBalance = this.walletBalance > (Number(this.minimumStaking) + Number(this.txWeight))
+      try {
+        const minimumStaking = await queryGeneticAnalystMinimumStakeAmount(this.api)
+        const getTxWeight = await this.getTxWeight()
+        this.txWeight = `${this.web3.utils.fromWei(String(getTxWeight.partialFee), "ether")}`
+        this.minimumStaking = this.web3.utils.fromWei(String(minimumStaking.toString().split(",").join("")), "ether")
+        this.sufficientBalance = this.walletBalance > (Number(this.minimumStaking) + Number(this.txWeight))
+      } catch (err) {
+        console.error(err)
+      }
     },
 
     async getTxWeight() {
