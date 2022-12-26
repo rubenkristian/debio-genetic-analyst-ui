@@ -17,7 +17,7 @@
             stroke
           )
           template
-            span.hp-dashboard__alert-text Your verification submission is being reviewed by Daogenic
+            span.hp-dashboard__alert-text Your verification submission is being reviewed by Daogenics
 
             ui-debio-modal.hp-dashboard__modal(
               :show="isNotInstalled"
