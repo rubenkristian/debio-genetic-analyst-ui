@@ -235,42 +235,24 @@
 
       v-radio-group.ga-account__radio-input(
         :disabled="disableFields"
-        v-model="info.privacy"
+        v-model="info.anonymous"
         row
       )
-        v-radio(label="Hide My Identity" value="hide")
-        v-radio(label="Show My Identity" value="show")
+        v-radio(label="Hide My Identity" :value="true")
+        v-radio(label="Show My Identity" :value="false")
     
-
-
-    ui-debio-input(
-      v-if="role === 'health-professional' && info.privacy === 'show'"
-      :error="isDirty.info && isDirty.info.username"
-      :disabled="disableFields"
-      variant="small"
-      label="Username"
-      placeholder="PinkPanter"
-      v-model="info.username"
-      outlined
-      block
-      validate-on-blur
-      style="margin-top: 15px;"
-      max="12"
-    )
-
-
     label.text-title Qualification
 
     ui-debio-dropdown(
       v-if="role === 'genetic-analyst' || info.registerAs === 'Medical Doctor - Specialist Practitioner'"
       :items="categories"
-      :error="isDirty.info && isDirty.info.specialization"
-      :rules="$options.rules.info.specialization"
+      :error="isDirty.specialization"
+      :rules="$options.rules.specialization"
       :disabled="disableFields"
       variant="small"
       label="Specialization"
       placeholder="Select Specialization"
-      v-model="info.specialization"
+      v-model="specialization"
       item-text="category"
       item-value="category"
       outlined
@@ -311,7 +293,7 @@
       )
       
       v-row.ga-account__experience-ph(v-if="role !== 'genetic-analyst'")
-        v-col(cols=7)
+        v-col(cols=6)
           ui-debio-input(
             :error-messages="experiences[idx].error"
             :disabled="disableFields"
@@ -330,7 +312,7 @@
             variant="small"
             label="Year Start"
             placeholder="Select"
-            v-model="experienceYear.start"
+            v-model="experiences[idx].start"
             outlined
             close-on-select
             validate-on-blur
@@ -343,7 +325,7 @@
             variant="small"
             label="Year End"
             placeholder="Select"
-            v-model="experienceYear.end"
+            v-model="experiences[idx].end"
             outlined
             close-on-select
             validate-on-blur
@@ -453,7 +435,7 @@
       @click="handleSubmit"
       :disabled="disable"
       block
-    ) {{ !account || isEditing ? "Next" : "Edit" }}
+    ) {{ isEditing ? "Edit" : "Next" }}
 
     CertificationDialog(
       :show="showCertDialog" 
@@ -474,6 +456,7 @@ import errorMessages from "@/common/constants/error-messages"
 import {uploadFile, getFileUrl} from "@/common/lib/pinata-proxy"
 import {getSpecializationCategory} from "@/common/lib/api"
 import {createQualificationFee, registerGeneticAnalystFee} from "@debionetwork/polkadot-provider"
+import { queryGetHealthProfessionalAccount } from "@/common/lib/polkadot-provider/query/health-professional"
 import { fileTextIcon, pencilIcon, trashIcon } from "@debionetwork/ui-icons"
 import { validateForms } from "@/common/lib/validate"
 import rulesHandler from "@/common/constants/rules"
@@ -516,10 +499,11 @@ export default {
       email: "",
       phoneNumber: "",
       dateOfBirth: null,
-      specialization: "",
       registerAs: null,
-      profHealthCategory: null
+      profHealthCategory: null,
+      anonymous: false
     },
+    specialization: "",
     profileLink: "",
     profileImage: "",
     experiences: [{title: "", error: ""}],
@@ -537,11 +521,7 @@ export default {
     txWeight: null,
     roles: ["Medical Doctor - Generalist Practitioner", "Medical Doctor - Specialist Practitioner", "Clinical Psychologist", "Clinical Psychiatrist"],
     profHealthCategories: ["Mental Health", "Physical Health"],
-    isEditing: false,
-    experienceYear: {
-      start: "",
-      end: ""
-    }
+    isEditing: false
   }),
 
   components: { CertificationDialog, InsufficientDialog},
@@ -571,11 +551,11 @@ export default {
 
     disableFields() {
       if (this.isEditing) return false
-      return this.role==="health-professional" && this.account
+      return this.role==="health-professional" && this.isEditing
     },
 
     disable() {
-      if(this.role==="health-professional" && this.account) {
+      if(this.role==="health-professional" && this.isEditing) {
         return false
       }
 
@@ -586,11 +566,14 @@ export default {
         email,
         phoneNumber,
         dateOfBirth,
-        specialization
+        registerAs
       } = this.info
       const experienceValidation = this.experiences.length === 1 && this.experiences.find(value => value.title === "")
 
-      if (!this.profileImage || !firstName || !lastName || !gender || !dateOfBirth || !email || !phoneNumber || !specialization || experienceValidation) {
+      if (!this.profileImage || !firstName || !lastName || !gender || !dateOfBirth || !email || !phoneNumber || !registerAs || experienceValidation) {
+        if (this.role === "genetic-analyst" || this.info.registerAs === "Medical Doctor - Specialist Practitioner") {
+          if (!this.specialization) return true
+        }
         return true
       }
       return false
@@ -649,26 +632,22 @@ export default {
       ],
       dateOfBirth: [
         rulesHandler.FIELD_REQUIRED
-      ],
-      specialization: [
-        rulesHandler.FIELD_REQUIRED
       ]
     },
     profileLink: [
       rulesHandler.ENGLISH_ALPHABET,
       rulesHandler.MAX_CHARACTER(255),
       rulesHandler.WEBSITE
+    ],
+    specialization: [
+      rulesHandler.FIELD_REQUIRED
     ]
   },
 
   async created() {
-    this.isLoading = true
-    await this.getTxWeight()
     await this.getSpecialization()
-
-    if (this.role === "health-professional" && this.account) await this.fetchAccountDetail()
-
-    this.isLoading = false
+    await this.getTxWeight()
+    if (this.role === "health-professional") await this.fetchAccountDetail()
   },
 
   methods: {
@@ -683,8 +662,21 @@ export default {
     },
 
     async fetchAccountDetail() {
-      this.info = this.account
-      this.experiences = this.account.experiences
+      const data = await queryGetHealthProfessionalAccount(this.api, this.wallet.address)
+      if(data) {
+        this.isEditing = true
+        this.info = data.info
+        this.info.profHealthCategory = data.info.category
+        this.info.registerAs = data.info.role
+        this.profileLink = data.info.profileLink
+        this.profileImage = data.info.profileImage
+        const dateOfBirth = String(data.info.dateOfBirth.replaceAll(",", ""))        
+        this.info.dateOfBirth = new Date(+dateOfBirth).toLocaleString("fr-CA", {
+          day: "numeric",
+          year: "numeric",
+          month: "numeric"
+        })
+      }
     },
 
     async getTxWeight() {
@@ -705,8 +697,7 @@ export default {
 
     addExperience() {
       const experiences = this.experiences
-      experiences.push({title: ""})
-
+      experiences.push({title: "", start: 0, end: 0})
       this.experiences = experiences
     },
 
@@ -742,11 +733,6 @@ export default {
     },
 
     handleSubmit() {
-      if (this.account && !this.isEditing) {
-        this.isEditing = true
-        return        
-      }
-
       this._touchForms("info")
       const isInfoValid = Object.values(this.isDirty?.info).every(v => v !== null && v === false)
       const experiences = experienceValidation(this.experiences)
@@ -825,6 +811,7 @@ export default {
 }
 
 function experienceValidation(data) {
+
   const experiences = []
   for (const experience of data) {
     if (rulesHandler.FIELD_REQUIRED(experience.title) !== true) {
@@ -845,7 +832,7 @@ function experienceValidation(data) {
 
     } else {
       experiences.push({
-        title: experience.title
+        title: `${experience.title} (${ experience.start } - ${experience.end})`
       })
     }
   }
